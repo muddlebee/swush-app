@@ -10,7 +10,7 @@ import { convertToPlank, formatAmount } from '../utils';
 export interface RouteQuote {
     path: string[];
     expectedOutput: {
-        raw: string;        // Original amount (planck/raw format)
+        raw: bigint;        // Original amount (planck/raw format)
         decimal: string;    // Decimal formatted amount for display/comparison
     };
     hops: {
@@ -44,7 +44,7 @@ export class AssetHubRouter {
         dex?: typeof NETWORKS_SUPPORTED.ASSET_HUB | typeof NETWORKS_SUPPORTED.HYDRA_DX
     ): Promise<RouteQuote | null> {
         try {
-            console.log('Starting findBestRoute:', {
+            console.log('Getting asset hub quote for:', {
                 fromAsset,
                 toAsset,
                 amountIn,
@@ -81,6 +81,20 @@ export class AssetHubRouter {
                     this.getHydraDxQuote(fromAsset, toAsset, amountIn.toString()) : null
             ]);
 
+            // Debug: Log quote results
+            console.log('DEBUG: Quote results:', {
+                assetHubQuote: assetHubQuote ? {
+                    dex: assetHubQuote.dex,
+                    expectedOutput: assetHubQuote.expectedOutput.decimal,
+                    raw: assetHubQuote.expectedOutput.raw
+                } : null,
+                hydraDxQuote: hydraDxQuote ? {
+                    dex: hydraDxQuote.dex,
+                    expectedOutput: hydraDxQuote.expectedOutput.decimal,
+                    raw: hydraDxQuote.expectedOutput.raw
+                } : null
+            });
+
             // Return based on dex preference and availability
             if (dex === NETWORKS_SUPPORTED.ASSET_HUB) return assetHubQuote;
             if (dex === NETWORKS_SUPPORTED.HYDRA_DX) return hydraDxQuote;
@@ -91,10 +105,14 @@ export class AssetHubRouter {
             if (!hydraDxQuote) return assetHubQuote;
 
             // Compare using decimal format
-            const assetHubAmount = parseFloat(assetHubQuote.expectedOutput.decimal);
-            const hydraDxAmount = parseFloat(hydraDxQuote.expectedOutput.decimal);
+            const assetHubAmount = assetHubQuote.expectedOutput.raw;
+            const hydraDxAmount = hydraDxQuote.expectedOutput.raw;
 
-            return assetHubAmount > hydraDxAmount ? assetHubQuote : hydraDxQuote;
+            console.log('DEBUG: Comparing quotes:', { assetHubAmount, hydraDxAmount });
+            const bestQuote = assetHubAmount > hydraDxAmount ? assetHubQuote : hydraDxQuote;
+            console.log('DEBUG: Selected best quote:', bestQuote.dex);
+            
+            return bestQuote;
 
         } catch (error) {
             console.error('Error finding best route:', error);
@@ -108,6 +126,12 @@ export class AssetHubRouter {
         amountIn: string
     ): Promise<RouteQuote | null> {
         try {
+            console.log('Getting HydraDx quote for:', {
+                fromAssetId,
+                toAssetId,
+                amountIn
+            });
+
             const fromAsset = this.assets?.get(fromAssetId);
             const toAsset = this.assets?.get(toAssetId);
 
@@ -157,7 +181,7 @@ export class AssetHubRouter {
             return {
                 path: [fromAssetId, toAssetId],
                 expectedOutput: {
-                    raw: amountOut.toString(),
+                    raw: amountOut,
                     decimal: formattedAmountOut.decimal
                 },
                 hops: [{
@@ -232,7 +256,7 @@ export class AssetHubRouter {
                     fromXcmLocation,
                     toXcmLocation,
                     currentAmount,
-                    true
+                    false
                 );
                 console.log('quote :', quote);
 
@@ -270,7 +294,10 @@ export class AssetHubRouter {
 
             return {
                 path,
-                expectedOutput: finalAmount,
+                expectedOutput: {
+                    raw: currentAmount,
+                    decimal: finalAmount.decimal
+                },
                 hops,
                 dex: NETWORKS_SUPPORTED.ASSET_HUB
             };

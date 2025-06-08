@@ -4,6 +4,7 @@ import { withPolkadotSdkCompat } from 'polkadot-api/polkadot-sdk-compat';
 import { hydration } from '@polkadot-api/descriptors';
 import * as SDK from '@galacticcouncil/sdk-next';
 import { NETWORKS_SUPPORTED } from '../constants';
+import { base } from '@/assets/external';
 
 export type HydraDxPapiClient = ReturnType<typeof createClient>;
 export type HydraDxPapiApi = ReturnType<HydraDxPapiClient['getTypedApi']>;
@@ -46,10 +47,10 @@ export class HydraDxPapiConnectionFactory {
 
         // Create WebSocket provider with Node.js implementation
         const wsProvider = getWsProvider(endpoint);
-        
+
         // Create client with Polkadot SDK compatibility
         const client = createClient(withPolkadotSdkCompat(wsProvider));
-        
+
         // Get typed API for HydraDX
         const api = client.getTypedApi(hydration);
 
@@ -68,7 +69,7 @@ export class HydraDxPapiConnectionFactory {
         if (onConnectionEvent) {
           // PAPI has different event model, set up basic monitoring
           this.setupConnectionMonitoring(connection, onConnectionEvent);
-          
+
           // Notify connection established
           onConnectionEvent(NETWORKS_SUPPORTED.HYDRA_DX, 'connected');
         }
@@ -82,15 +83,15 @@ export class HydraDxPapiConnectionFactory {
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         console.error(`❌ Failed to create HydraDX PAPI connection: ${errorMessage}`);
-        
+
         if (onConnectionEvent) {
           onConnectionEvent(
-            NETWORKS_SUPPORTED.HYDRA_DX, 
-            'error', 
+            NETWORKS_SUPPORTED.HYDRA_DX,
+            'error',
             error instanceof Error ? error : new Error(errorMessage)
           );
         }
-        
+
         throw new Error(`Failed to create HydraDX PAPI connection: ${errorMessage}`);
       }
     };
@@ -107,7 +108,7 @@ export class HydraDxPapiConnectionFactory {
       const validationPromise = Promise.race([
         // Try a very basic constant query
         api.constants.System.Version(),
-        new Promise((_, reject) => 
+        new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Validation timeout')), 3000)
         )
       ]);
@@ -116,11 +117,11 @@ export class HydraDxPapiConnectionFactory {
 
       // Verify we got valid chain info
       const isValid = !!(chainInfo && typeof chainInfo.spec_name === 'string');
-      
+
       if (!isValid) {
         console.warn('HydraDX PAPI validation: Invalid chain info received');
       }
-      
+
       return isValid;
     } catch (error) {
       // Don't log every validation failure to reduce noise
@@ -204,7 +205,7 @@ export class HydraDxPapiConnectionFactory {
       // Destroy the client
       await Promise.race([
         connection.client.destroy(),
-        new Promise((_, reject) => 
+        new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Disconnect timeout')), 5000)
         )
       ]);
@@ -227,8 +228,8 @@ export class HydraDxPapiConnectionFactory {
       // Create SDK-Next PoolContextProvider with all pool types
       return new SDK.pool.PoolContextProvider(connection.client)
         .withOmnipool()
-        .withStableswap()
-        .withXyk();
+        .withStableswap();
+      //   .withXyk(); TODO: add later when XCMv5 is supported
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Failed to create HydraDX SDK-Next pool context: ${errorMessage}`);

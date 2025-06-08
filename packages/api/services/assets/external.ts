@@ -1,7 +1,7 @@
 export const base = [
   {
     decimals: 10,
-    id: '23',
+    id: 23,
     internalId: '1000021',
     name: 'PINK',
     origin: 1000,
@@ -9,7 +9,7 @@ export const base = [
   },
   {
     decimals: 10,
-    id: '30',
+    id: 30,
     internalId: '1000019',
     name: 'DED',
     origin: 1000,
@@ -17,7 +17,7 @@ export const base = [
   },
   {
     decimals: 10,
-    id: '31337',
+    id: 31337,
     internalId: '1000085',
     name: 'WUD',
     origin: 1000,
