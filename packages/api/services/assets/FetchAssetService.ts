@@ -5,9 +5,9 @@ import { getForeignAssetId, getNativeAssetId, getXcmV3Multilocation, safeStringi
 import { ConnectionManager } from '../network/ConnectionManager';
 import { CACHE_KEYS } from '../constants';
 import { NATIVE_DOT_ASSET } from './metadata';
-import { TradeRouterService } from './router/TradeRouterService';
 import { CacheService } from '../cache/CacheService';
 import { TokenGraph } from './router/TokenGraph';
+import { HydraDxRouterService } from './router/HydraDxRouterService';
 
 export class FetchAssetService {
     private static instance: FetchAssetService;
@@ -299,65 +299,152 @@ export class FetchAssetService {
         foreignAssetsInfo: Map<string, Asset>
 
     ): Promise<Map<string, Asset>> {
-        const hydraApi = this.connectionManager.getHydradxApi();
-        if (!hydraApi) throw new Error('HydraDX API not initialized');
-
-        const mergedAssets = new Map<string, Asset>(assetHubAssets);
-
+        console.log('🔄 Starting HydraDX asset enrichment using SDK-Next...');
+        
         try {
-            const tradeRouter = TradeRouterService.getInstance().getTradeRouter();
-            const hydradxPools = await tradeRouter.getPools();
+            // Get the HydraDX router service (which should already be initialized)
+            const hydraRouter = HydraDxRouterService.getInstance();
+            
+            if (!hydraRouter.isInitialized()) {
+                console.warn('⚠️ HydraDX router not initialized, skipping enrichment');
+                return this.fallbackMergeAssets(assetHubAssets, nativeAssetsInfo, foreignAssetsInfo);
+            }
 
-            // Process all HydraDX pools
-            for (const pool of hydradxPools) {
-                for (const token of pool.tokens) {
-                    const hydradxInfo = {
-                        assetId: token.id,
-                        location: token.location,
-                        poolAddress: pool.address,
-                        poolType: pool.type,
-                        balance: token.balance,
-                        existentialDeposit: token.existentialDeposit
-                    };
+            // Get the PAPI connection for HydraDX
+            const connectionManager = this.connectionManager;
+            const papiConnection = await connectionManager.getHydraDxPapiConnectionWithRetry(15000);
+            
+            if (!papiConnection) {
+                console.warn('⚠️ HydraDX PAPI connection not available, skipping enrichment');
+                return this.fallbackMergeAssets(assetHubAssets, nativeAssetsInfo, foreignAssetsInfo);
+            }
 
-                    // Try to match native asset first
-                    const nativeAssetId = getNativeAssetId(token.location);
-                    if (nativeAssetId !== null) {
-                        const nativeAsset = nativeAssetsInfo.get(nativeAssetId);
-                        if (nativeAsset) {
-                            const existingAsset = mergedAssets.get(nativeAssetId);
+            console.log('✅ Using HydraDX PAPI connection for asset discovery');
 
-                            if (existingAsset) {
-                                existingAsset.hydradx = hydradxInfo;
-                            } else {
-                                const newAsset = { ...nativeAsset, hydradx: hydradxInfo };
-                                mergedAssets.set(nativeAssetId, newAsset);
+            // Get the router
+            const router = hydraRouter.getRouter();
+            
+            if (!router) {
+                console.warn('⚠️ HydraDX router not available, skipping enrichment');
+                return this.fallbackMergeAssets(assetHubAssets, nativeAssetsInfo, foreignAssetsInfo);
+            }
+
+            // Get all pools using SDK-Next getPools method
+            const pools = await router.getPools();
+            console.log(`🔍 Found ${pools.length} pools on HydraDX`);
+
+            // Start with asset hub assets
+            const mergedAssets = new Map<string, Asset>(assetHubAssets);
+
+            // Process pools to find assets and their pool information
+            for (const pool of pools) {
+                try {
+                    // Each pool has tokens with their IDs and other information
+                    const tokens = (pool as any).tokens || [];
+                    
+                    for (const token of tokens) {
+                        const assetId = token.id?.toString() || '';
+                        
+                        if (!assetId) continue;
+
+                        // Create HydraDX info structure following original pattern
+                        const hydradxInfo = {
+                            assetId: assetId,
+                            location: token.location || null,
+                            poolAddress: (pool as any).address || '',
+                            poolType: (pool as any).type || 'Unknown',
+                            balance: '0', // Pool balance would need specific extraction per pool type
+                            existentialDeposit: '0'
+                        };
+
+                        // Try to match with Asset Hub assets by asset ID first, then symbol
+                        let matchedAsset: Asset | null = null;
+                        let matchedAssetId: string | null = null;
+
+                        // Check if we already have this asset in our merged assets
+                        if (mergedAssets.has(assetId)) {
+                            matchedAsset = mergedAssets.get(assetId)!;
+                            matchedAssetId = assetId;
+                        } else {
+                            // Try to match by symbol if available
+                            const tokenSymbol = token.symbol || '';
+                            if (tokenSymbol) {
+                                for (const [assetHubId, asset] of mergedAssets.entries()) {
+                                    if (asset.metadata.symbol === tokenSymbol) {
+                                        matchedAsset = asset;
+                                        matchedAssetId = assetHubId;
+                                        break;
+                                    }
+                                }
                             }
-                            continue;
+                        }
+
+                        // If we found a match, enrich the Asset Hub asset
+                        if (matchedAsset && matchedAssetId) {
+                            matchedAsset.hydradx = hydradxInfo;
+                            console.log(`✅ Enriched asset ${matchedAssetId} with HydraDX pool data`);
+                        } else {
+                            console.log(`ℹ️ HydraDX asset ${assetId} not found in Asset Hub assets`);
                         }
                     }
 
-                    // Try to match foreign asset
-                    const foreignId = getForeignAssetId(token.location);
-                    if (foreignId !== null) {
-                        const foreignAsset = foreignAssetsInfo.get(foreignId);
-                        if (foreignAsset) {
-                            const existingAsset = mergedAssets.get(foreignId);
-                            if (existingAsset) {
-                                existingAsset.hydradx = hydradxInfo;
-                            } else {
-                                const newAsset = { ...foreignAsset, hydradx: hydradxInfo };
-                                mergedAssets.set(foreignId, newAsset);
-                            }
-                        }
-                    }
+                } catch (error) {
+                    console.warn(`⚠️ Error processing HydraDX pool:`, error);
+                    continue;
                 }
             }
 
+            // Add any remaining native and foreign assets that aren't in pools
+            this.addRemainingAssets(mergedAssets, nativeAssetsInfo, foreignAssetsInfo);
+
+            const enrichedCount = Array.from(mergedAssets.values()).filter(asset => !!asset.hydradx).length;
+            console.log(`✅ HydraDX enrichment completed: ${enrichedCount} assets enriched out of ${mergedAssets.size} total assets`);
+
             return mergedAssets;
+
         } catch (error) {
-            console.error('Error enriching with HydraDX data:', error);
-            throw error;
+            console.error('❌ Error during HydraDX asset enrichment:', error);
+            console.log('🔄 Falling back to basic asset merging');
+            return this.fallbackMergeAssets(assetHubAssets, nativeAssetsInfo, foreignAssetsInfo);
+        }
+    }
+
+    /**
+     * Fallback method to merge assets without HydraDX enrichment
+     */
+    private fallbackMergeAssets(
+        assetHubAssets: Map<string, Asset>,
+        nativeAssetsInfo: Map<string, Asset>,
+        foreignAssetsInfo: Map<string, Asset>
+    ): Map<string, Asset> {
+        console.log('📦 Using fallback asset merging without HydraDX enrichment');
+        
+        const mergedAssets = new Map<string, Asset>(assetHubAssets);
+        this.addRemainingAssets(mergedAssets, nativeAssetsInfo, foreignAssetsInfo);
+        
+        return mergedAssets;
+    }
+
+    /**
+     * Add native and foreign assets that might not be in Asset Hub pools
+     */
+    private addRemainingAssets(
+        mergedAssets: Map<string, Asset>,
+        nativeAssetsInfo: Map<string, Asset>,
+        foreignAssetsInfo: Map<string, Asset>
+    ): void {
+        // Add native assets that might not be in pools yet
+        for (const [id, asset] of nativeAssetsInfo) {
+            if (!mergedAssets.has(id)) {
+                mergedAssets.set(id, asset);
+            }
+        }
+        
+        // Add foreign assets that might not be in pools yet
+        for (const [id, asset] of foreignAssetsInfo) {
+            if (!mergedAssets.has(id)) {
+                mergedAssets.set(id, asset);
+            }
         }
     }
 }    

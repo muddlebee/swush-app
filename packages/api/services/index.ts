@@ -1,7 +1,7 @@
 import { FetchAssetService } from './assets/FetchAssetService';
 import { Asset } from './assets/types';
 import { ConnectionManager } from './network/ConnectionManager';
-import { TradeRouterService } from './assets/router/TradeRouterService';
+import { HydraDxRouterService } from './assets/router/HydraDxRouterService';
 
 let isInitialized = false;
 
@@ -16,13 +16,13 @@ export async function initializeSDK(): Promise<void> {
         console.log('Initializing network connections...');
         await ConnectionManager.getInstance().initialize();
 
-        // Step 2: Initialize TradeRouter with external assets (allow partial failure)
-        console.log('Initializing trade router...');
+        // Step 2: Initialize HydraDX Router (SDK-Next) - allow partial failure
+        console.log('Initializing HydraDX router (SDK-Next)...');
         try {
-            await TradeRouterService.getInstance().initialize([]);
-            console.log('TradeRouter initialized successfully');
+            await HydraDxRouterService.getInstance().initialize();
+            console.log('HydraDX Router initialized successfully');
         } catch (error) {
-            console.warn('⚠️ TradeRouter initialization failed, continuing without it:', error instanceof Error ? error.message : error);
+            console.warn('⚠️ HydraDX Router initialization failed, continuing without it:', error instanceof Error ? error.message : error);
             // Don't throw - continue with other services
         }
 
@@ -56,9 +56,9 @@ export async function cleanupSDK(): Promise<void> {
         console.log('Starting SDK cleanup...');
         // Cleanup in reverse order of initialization
         try {
-            await TradeRouterService.getInstance().cleanup();
+            HydraDxRouterService.getInstance().reset();
         } catch (error) {
-            console.warn('Error cleaning up TradeRouter:', error);
+            console.warn('Error cleaning up HydraDX Router:', error);
         }
         
         try {

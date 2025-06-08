@@ -3,10 +3,11 @@ import { polkadot_asset_hub } from '@polkadot-api/descriptors';
 import { ApiPromise } from '@polkadot/api';
 import { EndpointProvider } from './EndpointProvider';
 import { ConnectionFactory, AssetHubConnection, ConnectionEventCallback } from './ConnectionFactory';
+import { HydraDxPapiConnectionFactory, HydraDxPapiConnection } from './HydraDxPapiConnection';
 import { CONNECTION_HEALTH_CHECK_INTERVAL, NETWORKS_SUPPORTED } from '../constants';
 
 interface NetworkConnection {
-    connection: AssetHubConnection | ApiPromise | null;
+    connection: AssetHubConnection | ApiPromise | HydraDxPapiConnection | null;
     isReady: boolean;
     isConnecting: boolean;
     lastConnected: Date | null;
@@ -61,12 +62,12 @@ export class ConnectionManager {
     }
 
     private setupHealthChecking(): void {
-        // More frequent health checks to catch stale connections faster
+        // Reduce health check frequency to prevent reconnection loops
         this.healthCheckInterval = setInterval(async () => {
             if (!this.isShuttingDown && this.initialized) {
                 await this.performHealthChecks();
             }
-        }, 30000); // Check every 30 seconds instead of 60
+        }, 120000); // Check every 2 minutes to be less aggressive
     }
 
     private async performHealthChecks(): Promise<void> {
@@ -76,7 +77,18 @@ export class ConnectionManager {
 
             try {
                 const startTime = Date.now();
-                const isValid = await ConnectionFactory.validateConnection(connection.connection, network);
+                let isValid = false;
+                
+                if (network === NETWORKS_SUPPORTED.HYDRA_DX) {
+                    // Use PAPI validation for HydraDX
+                    const papiConnection = connection.connection as HydraDxPapiConnection;
+                    if (papiConnection && papiConnection.api) {
+                        isValid = await HydraDxPapiConnectionFactory.validateConnection(papiConnection.api);
+                    }
+                } else {
+                    // Use existing validation for other networks
+                    isValid = await ConnectionFactory.validateConnection(connection.connection, network);
+                }
                 
                 if (!isValid) {
                     throw new Error('Connection validation failed');
@@ -244,21 +256,31 @@ export class ConnectionManager {
             connectionState.currentEndpoint = selectedEndpoint;
             console.log(`🔌 Connecting to ${network} via ${selectedEndpoint}`);
 
-            let connection: AssetHubConnection | ApiPromise;
+            let connection: AssetHubConnection | ApiPromise | HydraDxPapiConnection;
             
             switch (network) {
                 case NETWORKS_SUPPORTED.ASSET_HUB:
                     connection = await ConnectionFactory.createAssetHubConnection(selectedEndpoint, this.handleConnectionEvent);
                     break;
                 case NETWORKS_SUPPORTED.HYDRA_DX:
-                    connection = await ConnectionFactory.createHydradxConnection(selectedEndpoint, this.handleConnectionEvent);
+                    // Use PAPI connection for HydraDX (SDK-Next compatible)
+                    connection = await HydraDxPapiConnectionFactory.createConnection(selectedEndpoint, this.handleConnectionEvent);
                     break;
                 default:
                     throw new Error(`Unsupported network: ${network}`);
             }
 
             // Validate the connection before marking as ready
-            const isValid = await ConnectionFactory.validateConnection(connection, network);
+            let isValid = false;
+            if (network === NETWORKS_SUPPORTED.HYDRA_DX) {
+                // Use PAPI validation for HydraDX
+                const papiConnection = connection as HydraDxPapiConnection;
+                isValid = await HydraDxPapiConnectionFactory.validateConnection(papiConnection.api);
+            } else {
+                // Use existing validation for other networks
+                isValid = await ConnectionFactory.validateConnection(connection, network);
+            }
+            
             if (!isValid) {
                 throw new Error('Connection validation failed');
             }
@@ -306,8 +328,17 @@ export class ConnectionManager {
                 const connection = connectionState.connection as AssetHubConnection;
                 await ConnectionFactory.disconnectAssetHub(connection);
             } else if (network === NETWORKS_SUPPORTED.HYDRA_DX) {
-                const api = connectionState.connection as ApiPromise;
-                await ConnectionFactory.disconnectHydradx(api);
+                // Handle both legacy and PAPI connections
+                const connection = connectionState.connection;
+                if ((connection as HydraDxPapiConnection).client) {
+                    // PAPI connection
+                    const papiConnection = connection as HydraDxPapiConnection;
+                    await HydraDxPapiConnectionFactory.disconnect(papiConnection);
+                } else {
+                    // Legacy Polkadot.js connection
+                    const api = connection as ApiPromise;
+                    await ConnectionFactory.disconnectHydradx(api);
+                }
             }
         } catch (error) {
             console.warn(`Error cleaning up ${network} connection:`, error);
@@ -467,6 +498,64 @@ export class ConnectionManager {
             return isReady ? this.getHydradxApi() : null;
         } catch (error) {
             console.error('Error in getHydradxApiWithRetry:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Get HydraDX PAPI connection (new SDK-Next compatible)
+     */
+    public getHydraDxPapiConnection(): HydraDxPapiConnection | null {
+        const connection = this.connections.get(NETWORKS_SUPPORTED.HYDRA_DX);
+        if (!connection?.isReady || !connection.connection) {
+            return null;
+        }
+
+        // Check if this is a PAPI connection
+        const papiConnection = connection.connection as HydraDxPapiConnection;
+        if (papiConnection && typeof papiConnection.api !== 'undefined' && papiConnection.isConnected) {
+            return papiConnection;
+        }
+
+        return null;
+    }
+
+    /**
+     * Get HydraDX PAPI connection with retry (new SDK-Next compatible)
+     */
+    public async getHydraDxPapiConnectionWithRetry(timeoutMs: number = 5000): Promise<HydraDxPapiConnection | null> {
+        try {
+            // Try to get immediate PAPI connection
+            let connection = this.getHydraDxPapiConnection();
+            if (connection) {
+                // Quick validation
+                try {
+                    const isValid = await HydraDxPapiConnectionFactory.validateConnection(connection.api);
+                    if (isValid) {
+                        return connection;
+                    } else {
+                        console.warn('HydraDX PAPI connection failed validation, reconnecting...');
+                        const connectionState = this.connections.get(NETWORKS_SUPPORTED.HYDRA_DX);
+                        if (connectionState) {
+                            connectionState.isReady = false;
+                            this.scheduleReconnection(NETWORKS_SUPPORTED.HYDRA_DX, 100);
+                        }
+                    }
+                } catch (error) {
+                    console.warn('HydraDX PAPI connection validation error:', error);
+                    const connectionState = this.connections.get(NETWORKS_SUPPORTED.HYDRA_DX);
+                    if (connectionState) {
+                        connectionState.isReady = false;
+                        this.scheduleReconnection(NETWORKS_SUPPORTED.HYDRA_DX, 100);
+                    }
+                }
+            }
+
+            // Wait for connection to become available
+            const isReady = await this.waitForConnection(NETWORKS_SUPPORTED.HYDRA_DX, timeoutMs);
+            return isReady ? this.getHydraDxPapiConnection() : null;
+        } catch (error) {
+            console.error('Error in getHydraDxPapiConnectionWithRetry:', error);
             return null;
         }
     }

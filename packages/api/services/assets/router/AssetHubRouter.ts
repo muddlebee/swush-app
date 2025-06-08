@@ -1,7 +1,7 @@
 import { TypedApi } from 'polkadot-api';
 import { polkadot_asset_hub } from '@polkadot-api/descriptors';
 import { TokenGraph } from './TokenGraph';
-import { TradeRouterService } from './TradeRouterService';
+import { HydraDxRouterService } from './HydraDxRouterService';
 import { CacheService } from '../../cache/CacheService';
 import { CACHE_KEYS, NETWORKS_SUPPORTED, NUMBER_FORMAT_OPTIONS } from '../../constants';
 import { Asset } from '../types';
@@ -115,11 +115,27 @@ export class AssetHubRouter {
                 return null;
             }
 
-            const tradeRouter = TradeRouterService.getInstance().getTradeRouter();
-            const trade = await tradeRouter.getBestSell(
+            const hydraRouter = HydraDxRouterService.getInstance();
+            
+            // Ensure the HydraDX router is initialized
+            if (!hydraRouter.isInitialized()) {
+                console.warn('HydraDX router not initialized, skipping quote');
+                return null;
+            }
+
+            // Convert string amount to bigint (planck units)
+            const fromAssetDetails = this.assets?.get(fromAssetId);
+            if (!fromAssetDetails) {
+                console.error('From asset details not found');
+                return null;
+            }
+            
+            const amountInPlanck = convertToPlank(amountIn, fromAssetDetails.metadata.decimals);
+            
+            const trade = await hydraRouter.getBestSell(
                 fromAsset.hydradx.assetId,
                 toAsset.hydradx.assetId,
-                amountIn
+                amountInPlanck
             );
 
             console.log('HydraDx Quote:', trade?.toHuman());
@@ -129,18 +145,19 @@ export class AssetHubRouter {
             // Use constant format options
             const formatOptions = NUMBER_FORMAT_OPTIONS;
 
-            // const formattedAmountIn = formatAmount(trade.amountIn.toString(), fromAsset.metadata.decimals, formatOptions);
-            const formattedAmountOut = formatAmount(trade.amountOut.toString(), toAsset.metadata.decimals, formatOptions);
+            // Get the amount out from the SDK-Next Trade result
+            const amountOut = trade.amountOut;
+            const formattedAmountOut = formatAmount(amountOut.toString(), toAsset.metadata.decimals, formatOptions);
 
-            // if (!formattedAmountIn || !formattedAmountOut) {
-            //     console.error('Error formatting amounts for HydraDX quote');
-            //     return null;
-            // }
+            if (!formattedAmountOut) {
+                console.error('Error formatting amounts for HydraDX quote');
+                return null;
+            }
 
             return {
                 path: [fromAssetId, toAssetId],
                 expectedOutput: {
-                    raw: trade.amountOut.toString(),
+                    raw: amountOut.toString(),
                     decimal: formattedAmountOut.decimal
                 },
                 hops: [{

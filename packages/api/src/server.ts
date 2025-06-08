@@ -4,7 +4,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { assetsRouter } from './routes/assets';
 import { balancesRouter } from './routes/balances';
-import { initializeSDK } from '../services';
+import { initializeSDK, cleanupSDK } from '../services';
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -43,6 +43,23 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
     status: 'error',
     message: 'Internal server error'
   });
+});
+
+// Add global error handlers for PAPI runtime errors
+process.on('unhandledRejection', (reason, promise) => {
+  console.warn('Unhandled Promise Rejection at:', promise, 'reason:', reason);
+  // Don't exit the process, just log the error
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  // For PAPI runtime errors, we'll log but not crash
+  if (error.message?.includes('runtime') || error.message?.includes('PAPI') || error.message?.includes('observable')) {
+    console.warn('PAPI runtime error caught, continuing execution...');
+    return;
+  }
+  // For other critical errors, we should exit
+  process.exit(1);
 });
 
 app.listen(port, () => {
