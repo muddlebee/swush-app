@@ -8,6 +8,8 @@ services:
     volumes:
       - ./packages/api:/app/packages/api
       - ./.papi:/app/.papi
+            - ./.papi:/app/.papi
+
       - /app/packages/api/node_modules
     ports:
       - "3001:3001"
