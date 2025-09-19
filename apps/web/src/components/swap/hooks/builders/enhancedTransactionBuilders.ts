@@ -189,7 +189,7 @@ export const buildEnhancedHydraDxTransaction = async (
           throw new Error('HydraDX connection not available for dry run validation');
         }
 
-        const hydraDxApi = hydraDxConnection.api as unknown as TypedApi<typeof hydration>;
+        const hydraDxApi = hydraDxConnection.api as TypedApi<typeof hydration>;
         const dryRunService = XcmDryRunService.getInstance();
 
         // Perform comprehensive XCM dry run for validation

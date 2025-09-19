@@ -27,7 +27,7 @@ export class UserService {
       }
 
       // Create new user
-      const { data: newUser, error: insertError } = await supabase
+      const { data: newUser, error: insertError } = await (supabase as any)
         .from('users')
         .insert([{
           wallet_address: walletAddress,
@@ -53,7 +53,7 @@ export class UserService {
   static async updateUserXP(walletAddress: string, xpToAdd: number): Promise<User> {
     try {
       // First get current XP
-      const { data: user, error: fetchError } = await supabase
+      const { data: user, error: fetchError } = await (supabase as any)
         .from('users')
         .select()
         .eq('wallet_address', walletAddress)
@@ -67,7 +67,7 @@ export class UserService {
       const newRank = this.calculateRank(newXP);
 
       // Update user
-      const { data: updatedUser, error: updateError } = await supabase
+      const { data: updatedUser, error: updateError } = await (supabase as any)
         .from('users')
         .update({
           xp: newXP,

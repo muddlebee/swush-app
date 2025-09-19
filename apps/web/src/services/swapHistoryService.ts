@@ -5,6 +5,7 @@ export type SwapHistory = Database['public']['Tables']['swap_history']['Row'];
 export type SwapHistoryInsert = Database['public']['Tables']['swap_history']['Insert'];
 export type SwapHistoryUpdate = Database['public']['Tables']['swap_history']['Update'];
 
+//TODO: fix the supabase type error
 export class SwapHistoryService {
   /**
    * Records a new swap in the history
@@ -20,9 +21,9 @@ export class SwapHistoryService {
     chainTo?: string
   ): Promise<SwapHistory> {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from('swap_history')
-        .insert([{
+        .insert({
           user_wallet: walletAddress,
           from_asset: fromAsset,
           to_asset: toAsset,
@@ -31,7 +32,7 @@ export class SwapHistoryService {
           chain_to: chainTo,
           route_used: routeUsed,
           status
-        }])
+        })
         .select()
         .single();
 
@@ -72,7 +73,7 @@ export class SwapHistoryService {
     status: 'success' | 'failed'
   ): Promise<SwapHistory> {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from('swap_history')
         .update({ status })
         .eq('id', swapId)
