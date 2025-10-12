@@ -300,16 +300,12 @@ export function SwapContainer() {
             />
 
             <SubmitButtonAction
-              isConnected={isConnected}
               isSwapping={isSwapping}
-              setIsConnected={setIsConnected}
-              setWalletAddress={setWalletAddress}
               onSwap={() => {
                 setShowConfirmation(true);
                 // handleSwapExecution(isConnected)
               }}
-              insufficientBalance={insufficientBalance}
-              disabled={!inputAmount || inputAmount === '' || parseFloat(inputAmount) <= 0 || insufficientBalance}
+              disabled={!inputAmount || inputAmount === '' || parseFloat(inputAmount) <= 0 || !outputAmount || outputAmount === ''}
               isLoadingQuote={isLoadingQuote}
             />
           </div>
