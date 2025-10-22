@@ -102,7 +102,7 @@ export function SwapContainer() {
     outputToken,
     walletAddress,
     slippageTolerance,
-    skipPriceFetch: true, // 🔥 TEMPORARY: Skip price fetch for testing swap signing
+    skipPriceFetch: false, // 🔥 TEMPORARY: Skip price fetch for testing swap signing
     // Pass helpers from useXcmTokens
     getOptimalExchanges,
     determineCurrency,
